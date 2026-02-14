@@ -109,7 +109,7 @@ const LogViewer: React.FC<LogViewerProps> = ({
       } else {
         console.error(
           "Failed to cancel workflow:",
-          data.message || "Unknown error"
+          data?.message || "Unknown error"
         );
       }
     } catch (err) {
