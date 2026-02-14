@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import LogViewer from "./log-viewer";
 import { PlayButtonProps, InputField } from "../types/play-button.types";
+import { fetchClient } from "../lib/api";
 
 export const PlayButton: React.FC<PlayButtonProps> = ({
   workflowName,
@@ -91,23 +92,22 @@ export const PlayButton: React.FC<PlayButtonProps> = ({
         inputs[field.name] = field.value;
       });
 
-      const response = await fetch(
-        "http://127.0.0.1:8000/api/workflows/execute",
+      const { data, error: apiError } = await fetchClient.POST(
+        "/api/workflows/execute",
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
+          body: {
             name: workflowName,
-            inputs,
-          }),
+            inputs: inputs as unknown as Record<string, never>,
+          },
         }
       );
 
-      const data = await response.json();
+      if (apiError || !data?.task_id) {
+        throw new Error("Failed to execute workflow");
+      }
+
       setTaskId(data.task_id);
-      setLogPosition(data.log_position);
+      setLogPosition(data.log_position ?? 0);
       setIsRunning(true);
       setShowLogViewer(true);
       setShowModal(false);

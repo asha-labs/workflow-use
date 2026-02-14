@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { LogViewerProps } from "../types/log-viewer.types";
+import { fetchClient } from "../lib/api";
 
 const LogViewer: React.FC<LogViewerProps> = ({
   taskId,
@@ -36,15 +37,19 @@ const LogViewer: React.FC<LogViewerProps> = ({
 
     const pollLogs = async () => {
       try {
-        const response = await fetch(
-          `http://127.0.0.1:8000/api/workflows/logs/${taskId}?position=${position}`
+        const { data, error: apiError } = await fetchClient.GET(
+          "/api/workflows/logs/{task_id}",
+          {
+            params: {
+              path: { task_id: taskId },
+              query: { position },
+            },
+          }
         );
 
-        if (!response.ok) {
-          throw new Error(`Error fetching logs: ${response.status}`);
+        if (apiError || !data) {
+          throw new Error("Error fetching logs");
         }
-
-        const data = await response.json();
 
         if (data.logs && data.logs.length > 0) {
           setLogs((prevLogs) => [...prevLogs, ...data.logs]);
@@ -87,19 +92,16 @@ const LogViewer: React.FC<LogViewerProps> = ({
     setIsCancelling(true);
 
     try {
-      const response = await fetch(
-        `http://127.0.0.1:8000/api/workflows/tasks/${taskId}/cancel`,
+      const { data, error: apiError } = await fetchClient.POST(
+        "/api/workflows/tasks/{task_id}/cancel",
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
+          params: {
+            path: { task_id: taskId },
           },
         }
       );
 
-      const data = await response.json();
-
-      if (response.ok && data.success) {
+      if (!apiError && data?.success) {
         // The status will be updated through the polling mechanism
         if (onCancel) {
           onCancel();

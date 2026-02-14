@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -7,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 import aiofiles
 import yaml
 from browser_use import Browser
-from browser_use.llm import ChatBrowserUse
+from browser_use.llm import ChatBrowserUse, ChatOpenAI
 
 from workflow_use.controller.service import WorkflowController
 from workflow_use.workflow.service import Workflow
@@ -42,7 +43,7 @@ class WorkflowService:
 		self.log_dir.mkdir(exist_ok=True, parents=True)
 
 		# LLM / workflow executor
-		self.llm_instance = ChatBrowserUse(model='bu-latest')
+		self.llm_instance = None
 
 		self.browser_instance = Browser()
 		self.controller_instance = WorkflowController()
@@ -51,6 +52,20 @@ class WorkflowService:
 		self.active_tasks: Dict[str, TaskInfo] = {}
 		self.workflow_tasks: Dict[str, asyncio.Task] = {}
 		self.cancel_events: Dict[str, asyncio.Event] = {}
+
+	def _get_llm_instance(self):
+		if self.llm_instance is not None:
+			return self.llm_instance
+
+		if os.getenv('BROWSER_USE_API_KEY'):
+			self.llm_instance = ChatBrowserUse(model=os.getenv('BROWSER_USE_MODEL', 'bu-latest'))
+			return self.llm_instance
+
+		if os.getenv('OPENAI_API_KEY'):
+			self.llm_instance = ChatOpenAI(model=os.getenv('OPENAI_MODEL', 'gpt-4o-mini'))
+			return self.llm_instance
+
+		raise RuntimeError('Missing BROWSER_USE_API_KEY or OPENAI_API_KEY for workflow execution')
 
 	async def _log_file_position(self) -> int:
 		log_file = self.log_dir / 'backend.log'
@@ -181,13 +196,23 @@ class WorkflowService:
 				self.active_tasks[task_id].status = 'cancelled'
 				return
 
+			try:
+				llm_instance = self._get_llm_instance()
+			except Exception as e:
+				await self._write_log(log_file, f'[{ts}] Error initializing LLM: {e}\n')
+				self.active_tasks[task_id].status = 'failed'
+				self.active_tasks[task_id].error = str(e)
+				return
+
 			workflow_path = self.tmp_dir / workflow_name
 			try:
 				self.workflow_obj = Workflow.load_from_file(
-					str(workflow_path), llm=self.llm_instance, browser=self.browser_instance, controller=self.controller_instance
+					str(workflow_path), llm=llm_instance, browser=self.browser_instance, controller=self.controller_instance
 				)
 			except Exception as e:
-				print(f'Error loading workflow: {e}')
+				await self._write_log(log_file, f'[{ts}] Error loading workflow: {e}\n')
+				self.active_tasks[task_id].status = 'failed'
+				self.active_tasks[task_id].error = str(e)
 				return
 
 			await self._write_log(log_file, f'[{ts}] Executing workflow...\n')
